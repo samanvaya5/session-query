@@ -397,10 +397,6 @@ def build_index(output_dir: str = "./sessions/", db_path: str = "./sessions.db",
             (agent, parsed["session_id"]),
         ).fetchone()
 
-        existing_session = conn.execute(
-            "SELECT file_path FROM sessions WHERE agent = ? AND session_id = ?",
-            (agent, parsed["session_id"]),
-        ).fetchone()
         is_new = not has_session
 
         if not dry_run:
@@ -438,6 +434,32 @@ def build_index(output_dir: str = "./sessions/", db_path: str = "./sessions.db",
             if fp not in seen_paths:
                 conn.execute("DELETE FROM sessions WHERE file_path = ?", (fp,))
                 stats["removed"] += 1
+
+        # Dedup: remove lower-priority duplicates (e.g., Claude transcripts of
+        # OpenCode sessions). When the same session_id exists with multiple
+        # agents, keep only the highest-priority one.
+        # Priority: opencode > gemini > claude
+        for higher_agent, lower_agent in [
+            ("opencode", "gemini"), ("opencode", "claude"), ("gemini", "claude")
+        ]:
+            deleted = conn.execute(
+                """DELETE FROM sessions
+                   WHERE agent = ?
+                   AND session_id IN (
+                     SELECT session_id FROM sessions WHERE agent = ?
+                   )""",
+                (lower_agent, higher_agent),
+            ).rowcount
+            if deleted and deleted > 0:
+                stats["removed"] += deleted
+
+        # Also clean up leftover claude/gemini fingerprints for deduped files
+        conn.execute(
+            """DELETE FROM file_fingerprints WHERE agent != 'opencode'
+               AND file_path IN (
+                 SELECT file_path FROM file_fingerprints WHERE agent = 'opencode'
+               )"""
+        )
 
         all_fp_paths = conn.execute("SELECT file_path FROM file_fingerprints").fetchall()
         for (fp,) in all_fp_paths:
