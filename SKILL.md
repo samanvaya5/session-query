@@ -3,7 +3,7 @@ name: session-query
 description: Index and query extracted AI coding agent sessions. Interactive skill for searching across OpenCode, Claude Code, and GeminiCLI sessions by project, agent, date range, or conversation content. Also handles incremental extraction of new sessions. Triggers on: 'find sessions', 'search sessions', 'what did I work on', 'last week sessions', 'session history', 'find conversation', 'query sessions', 'session index', 'extract new sessions', 'incremental extraction', 'how many sessions', 'show me my work on X', or any request involving searching through past AI coding conversations.
 license: MIT
 metadata:
-  author: samanvayayagsen
+  author: samanvaya5
   version: "1.0.0"
   tags: [sessions, opencode, claude, gemini, search, history, extraction]
   category: productivity

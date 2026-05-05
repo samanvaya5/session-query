@@ -1,13 +1,13 @@
 # Session Query
 
-[![skills.sh](https://skills.sh/b/samanvayayagsen/session-query)](https://skills.sh/samanvayayagsen/session-query)
+[![skills.sh](https://skills.sh/b/samanvaya5/session-query)](https://skills.sh/samanvaya5/session-query)
 
 Search your AI coding history. An agent skill that lets you query through past coding sessions from OpenCode, Claude Code, and Gemini CLI — by project, agent, date range, or conversation content.
 
 ## Install
 
 ```bash
-npx skills add samanvayayagsen/session-query
+npx skills add samanvaya5/session-query
 ```
 
 ## What It Does
