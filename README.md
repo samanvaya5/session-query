@@ -17,26 +17,22 @@ You've had hundreds of AI coding sessions. Some were epic debugging adventures, 
 - **Search by project, agent, date range** — "What was I working on in the infa project last week with Claude?"
 - **Deep dive into sessions** — Read summaries, key actions, outcomes
 - **Navigate session hierarchy** — See which root sessions spawned sub-agents
-- **Incremental extraction** — Pull new sessions and keep the index up to date
+- **Auto-build on first run** — Just open any project and ask; the skill builds the database automatically
+- **One-command resync** — "resync database" rebuilds everything from scratch
 
 ## Quick Start
 
 1. **Install the skill** (see above)
 
-2. **Extract your sessions** (first time only):
-```bash
-# Find the bundled scripts directory
-SCRIPTS=$(python3 -c "from scripts.config import resolve_scripts_dir; print(resolve_scripts_dir())")
-OUT=$(python3 -c "from scripts.config import resolve_output_dir; print(resolve_output_dir())")
+2. **Ask your agent to build the database** (first time, or anytime you need to resync):
+   ```
+   "resync database"
+   "rebuild the session index"
+   ```
+   The skill will extract from OpenCode, Claude, and Gemini (2-5 minutes for ~1100 sessions).
 
-# Extract from all agents
-python3 $SCRIPTS/extract_opencode.py --output-dir $OUT
-python3 $SCRIPTS/extract_claude_code.py --output-dir $OUT
-python3 $SCRIPTS/extract_gemini.py --output-dir $OUT
-
-# Build the search index
-python3 $SCRIPTS/index_sessions.py --output-dir $OUT
-```
+3. **Query your history:**
+   ```
 
 3. **Ask your agent:**
    - "What sessions did I have last week?"

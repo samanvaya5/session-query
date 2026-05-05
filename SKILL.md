@@ -3,10 +3,12 @@ name: session-query
 description: >
   Index and query extracted AI coding agent sessions. Interactive skill for searching
   across OpenCode, Claude Code, and GeminiCLI sessions by project, agent, date range,
-  or conversation content. Also handles incremental extraction of new sessions.
+  or conversation content. Can auto-build the database on first run and handles
+  incremental or full resync of new sessions.
   Triggers on: find sessions, search sessions, what did I work on,
   last week sessions, session history, find conversation, query sessions,
   session index, extract new sessions, incremental extraction,
+  resync database, rebuild index, refresh sessions, pull latest sessions,
   how many sessions, show me my work on X, or any request involving
   searching through past AI coding conversations.
 license: MIT
@@ -30,45 +32,41 @@ The workflow has five stages (plus Stage 0 for first-time setup). Each stage end
 
 ### Stage 0: Environment Check + Config
 
-Before anything else, resolve paths and verify the session index database exists.
+Before anything else, ensure the skill is configured and the session index exists.
 
-**Step 0.1: Resolve paths using the config module.**
+**Step 0.1: Resolve paths and run first-time setup.**
 
-The bundled `scripts/config.py` handles all path resolution. Run it:
-
+Run the config module to resolve all paths:
 ```bash
 python3 $(dirname "$(python3 -c "import scripts.config; print(scripts.config.__file__)")")/config.py paths
 ```
 
-Or resolve each path individually:
+If `~/.session-query/config.yaml` doesn't exist yet, create it automatically:
 ```bash
-python3 -c "from scripts.config import resolve_db_path, resolve_scripts_dir, resolve_output_dir; print(resolve_db_path())"
-python3 -c "from scripts.config import resolve_scripts_dir; print(resolve_scripts_dir())"
-python3 -c "from scripts.config import resolve_output_dir; print(resolve_output_dir())"
+python3 -c "from scripts.config import init_config; init_config()"
 ```
 
-**Step 0.2: Check if the database exists.**
+This creates a config with sensible defaults. The user can edit `~/.session-query/config.yaml` later to customize paths.
 
-If `sessions.db` does not exist at the resolved path:
-- Tell the user: "The session index hasn't been built yet. You need to extract your sessions and index them first."
-- To extract: `python3 $(scripts/config.py scripts)/extract_opencode.py --output-dir $(scripts/config.py output)`
-- Then index: `python3 $(scripts/config.py scripts)/index_sessions.py --output-dir $(scripts/config.py output) --db-path $(scripts/config.py db)`
-- Wait for confirmation before running extraction (it can take minutes).
+**Step 0.2: Check if the database exists. Auto-build if missing.**
+
+If `sessions.db` does not exist at the resolved path, **do not just print commands**. Proactively offer to build it:
+
+> "The session index hasn't been built yet. I can extract your sessions from OpenCode, Claude, and Gemini now — it takes 2-5 minutes for ~1100 sessions. Want me to build it?"
+
+If user confirms, run a **full resync** (see Stage 4 — Full Resync below). This extracts from all 3 agents and indexes everything.
+
+If user declines, tell them they can run "resync database" anytime later.
 
 **Step 0.3: Check freshness.**
 
-Query the index to compare last index time against newest session file modification times. If stale, mention it.
+Once the DB exists, compare `MAX(indexed_at)` from the sessions table against the newest file modification times in the output directory. If stale:
 
-**Step 0.4: First-time config (if no config exists).**
+> "The index was last updated [date]. Some sessions may be missing. Want me to resync?"
 
-If `~/.session-query/config.yaml` doesn't exist, run:
-```bash
-python3 $(dirname "$(python3 -c "import scripts.config; print(scripts.config.__file__)")")/config.py init
-```
+If user confirms, run incremental extraction (see Stage 4 — Incremental below).
 
-This creates the config with sensible defaults. The user can edit `~/.session-query/config.yaml` to customize paths.
-
-**CHECKPOINT 0:** Only proceed to Stage 1 once the database is confirmed available and the user is satisfied with its freshness. If the DB doesn't exist and the user doesn't want to build it, stop here.
+**CHECKPOINT 0:** Only proceed to Stage 1 once the database exists and the user is satisfied with its freshness. If the DB doesn't exist and the user declines to build it, stop here.
 
 ---
 
@@ -189,45 +187,112 @@ Want me to:
 
 ---
 
-### Stage 4: Incremental Extraction
+### Stage 4: Extraction & Resync
 
-**Goal:** Pull new sessions that haven't been extracted yet.
+**Two modes:** Full Resync (rebuilds everything) and Incremental (new sessions only).
 
-This stage only triggers when the user explicitly asks: "extract new sessions", "pull latest", "update the index", etc.
+The skill decides which mode based on what the user asks:
+- "resync", "rebuild database", "refresh sessions", "pull all sessions" → **Full Resync**
+- "extract new", "pull latest", "update the index", "sync new" → **Incremental**
 
-Steps:
+This stage also runs from Stage 0 when the DB is missing (auto-build).
 
-1. Resolve paths:
+#### Full Resync
+
+Rebuilds everything from scratch. Use when: database doesn't exist, seems stale, or user explicitly wants a full refresh.
+
+**Step 4a.1: Resolve paths.**
 ```bash
-DB=$(python3 -c "from scripts.config import resolve_db_path; print(resolve_db_path())")
 OUT=$(python3 -c "from scripts.config import resolve_output_dir; print(resolve_output_dir())")
 SCRIPTS=$(python3 -c "from scripts.config import resolve_scripts_dir; print(resolve_scripts_dir())")
+DB=$(python3 -c "from scripts.config import resolve_db_path; print(resolve_db_path())")
 ```
 
-2. Read current watermark: `SELECT MAX(end_time) FROM sessions` against `$DB`
-
-3. Present the plan:
-
+**Step 4a.2: Present the plan and estimate.**
+Estimate session counts from source directories:
+```bash
+# Quick estimate from source file counts
+echo "OpenCode: $(python3 -c "import sqlite3; c=sqlite3.connect('$HOME/.local/share/opencode/opencode.db'); print(c.execute('SELECT COUNT(*) FROM conversation').fetchone()[0])" 2>/dev/null || echo "?") sessions"
+echo "Claude: $(find ~/.claude/projects -name '*.jsonl' 2>/dev/null | wc -l) project files + $(find ~/.claude/transcripts -name '*.jsonl' 2>/dev/null | wc -l) transcripts"
+echo "Gemini: $(find ~/.gemini/tmp -name '*.json' 2>/dev/null | wc -l) sessions"
 ```
-## Incremental Extraction Plan
 
-Last extraction covered sessions up to: [watermark date]
+Then present:
+```
+## Full Resync
 
-Estimated new sessions (from file modification times):
-- OpenCode: ~[N] new sessions
-- Claude Code: ~[N] new sessions
-- GeminiCLI: ~[N] new sessions
+I'll extract ALL sessions from scratch:
+- OpenCode (~[N] sessions)
+- Claude Code (~[N] sessions)  
+- Gemini CLI (~[N] sessions)
 
-I'll run:
-1. python3 $SCRIPTS/extract_opencode.py --output-dir $OUT --since [watermark]
-2. python3 $SCRIPTS/extract_claude_code.py --output-dir $OUT --since [watermark]
-3. python3 $SCRIPTS/extract_gemini.py --output-dir $OUT --since [watermark]
-4. python3 $SCRIPTS/index_sessions.py --output-dir $OUT --db-path $DB
+This will:
+1. Extract each agent's sessions to $OUT
+2. Rebuild the index at $DB
+
+Estimated time: 2-5 minutes.
 
 Proceed?
 ```
 
-Wait for confirmation. Then run extractors and re-index.
+**Step 4a.3: Run extraction and indexing.**
+After confirmation, run all three extractors (no --since flag = full extraction), then index:
+```bash
+python3 $SCRIPTS/extract_opencode.py --output-dir $OUT
+python3 $SCRIPTS/extract_claude_code.py --output-dir $OUT
+python3 $SCRIPTS/extract_gemini.py --output-dir $OUT
+python3 $SCRIPTS/index_sessions.py --output-dir $OUT --db-path $DB
+```
+
+**Step 4a.4: Report the result.**
+```
+## Resync Complete
+
+New sessions indexed: [N]
+- OpenCode: [N]
+- Claude Code: [N]
+- Gemini CLI: [N]
+
+Total in database: [N] sessions across [N] projects.
+
+Want to search them, or are you done?
+```
+
+#### Incremental Extraction
+
+Pulls only sessions newer than the last extraction watermark. Use when: user says "update", "pull latest", "extract new".
+
+**Step 4b.1: Resolve paths and read watermark.**
+```bash
+DB=$(python3 -c "from scripts.config import resolve_db_path; print(resolve_db_path())")
+OUT=$(python3 -c "from scripts.config import resolve_output_dir; print(resolve_output_dir())")
+SCRIPTS=$(python3 -c "from scripts.config import resolve_scripts_dir; print(resolve_scripts_dir())")
+WATERMARK=$(sqlite3 "$DB" "SELECT MAX(end_time) FROM sessions" 2>/dev/null || echo "")
+```
+
+**Step 4b.2: Present the plan.**
+```
+## Incremental Extraction
+
+Last extraction covered sessions up to: [watermark]
+
+Estimated new sessions:
+- OpenCode: ~[N]
+- Claude: ~[N]
+- Gemini: ~[N]
+
+Proceed?
+```
+
+**Step 4b.3: Run with --since flag.**
+```bash
+python3 $SCRIPTS/extract_opencode.py --output-dir $OUT --since "$WATERMARK"
+python3 $SCRIPTS/extract_claude_code.py --output-dir $OUT --since "$WATERMARK"
+python3 $SCRIPTS/extract_gemini.py --output-dir $OUT --since "$WATERMARK"
+python3 $SCRIPTS/index_sessions.py --output-dir $OUT --db-path $DB
+```
+
+**CHECKPOINT 4:** After any extraction run, report the delta and ask if the user wants to search the new sessions.
 
 ---
 
